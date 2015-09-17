@@ -21,7 +21,12 @@ except ImportError:
 parser = argparse.ArgumentParser(description='Font patcher for Powerline. Requires FontForge with Python bindings. Stores the patched font as a new, renamed font file by default.')
 parser.add_argument('target_fonts', help='font files to patch', metavar='font', nargs='+', type=argparse.FileType('rb'))
 parser.add_argument('--no-rename', help='don\'t add " for Powerline" to the font name', default=True, action='store_false', dest='rename_font')
+parser.add_argument('--varwidth', help='for variable width fonts', action="store_true")
 parser.add_argument('--source-font', help='source symbol font', metavar='font', dest='source_font', default='{0}/../fonts/powerline-symbols.sfd'.format(sys.path[0]), type=argparse.FileType('rb'))
+parser.add_argument('--verticaloffset', type=int, help='offset the symbols by this amount', default=0)
+parser.add_argument('--horizontaloffset', type=int, help='offset the symbols by this amount', default=0)
+parser.add_argument('--verticalscaleoffset', type=float, help='offset the symbols by this amount', default=0)
+parser.add_argument('--horizontalscaleoffset', type=float, help='offset the symbols by this amount', default=0)
 args = parser.parse_args()
 
 
@@ -55,7 +60,23 @@ class FontPatcher(object):
 
 			# Find the biggest char width and height in the Latin-1 extended range and the box drawing range
 			# This isn't ideal, but it works fairly well - some fonts may need tuning after patching
-			for cp in range(0x00, 0x17f) + range(0x2500, 0x2600):
+			for cp in range(0x00, 0x17f):
+				try:
+					bbox = target_font[cp].boundingBox()
+				except TypeError:
+					continue
+				if not target_font_width:
+					target_font_width = target_font[cp].width
+				if bbox[0] < target_bb[0]:
+					target_bb[0] = bbox[0]
+				if bbox[1] < target_bb[1]:
+					target_bb[1] = bbox[1]
+				if bbox[2] > target_bb[2]:
+					target_bb[2] = bbox[2]
+				if bbox[3] > target_bb[3]:
+					target_bb[3] = bbox[3]
+
+			for cp in range(0x2500, 0x2600):
 				try:
 					bbox = target_font[cp].boundingBox()
 				except TypeError:
@@ -72,13 +93,13 @@ class FontPatcher(object):
 					target_bb[3] = bbox[3]
 
 			# Find source and target size difference for scaling
-			x_ratio = (target_bb[2] - target_bb[0]) / (source_bb[2] - source_bb[0])
-			y_ratio = (target_bb[3] - target_bb[1]) / (source_bb[3] - source_bb[1])
+			x_ratio = (target_bb[2] - target_bb[0]) / (source_bb[2] - source_bb[0]) + args.horizontalscaleoffset
+			y_ratio = (target_bb[3] - target_bb[1]) / (source_bb[3] - source_bb[1]) + args.verticalscaleoffset
 			scale = psMat.scale(x_ratio, y_ratio)
 
 			# Find source and target midpoints for translating
-			x_diff = target_bb[0] - source_bb[0]
-			y_diff = target_bb[1] - source_bb[1]
+			x_diff = target_bb[0] - source_bb[0] + args.horizontaloffset
+			y_diff = target_bb[1] - source_bb[1] + args.verticaloffset
 			translate = psMat.translate(x_diff, y_diff)
 			transform = psMat.compose(scale, translate)
 
@@ -100,7 +121,8 @@ class FontPatcher(object):
 				target_font.transform(transform)
 
 				# Reset the font's glyph width so it's still considered monospaced
-				target_font[source_glyph.unicode].width = target_font_width
+				if not args.varwidth:
+					target_font[source_glyph.unicode].width = target_font_width
 
 			target_font.em = target_font_em_original
 
